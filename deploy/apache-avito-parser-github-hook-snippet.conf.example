@@ -1,0 +1,6 @@
+# Вставить внутрь <VirtualHost *:80> ВЫШЕ catch-all ProxyPass / или DocumentRoot.
+# Слушатель: 127.0.0.1:9848 (не пересекается с ai_parser:9847).
+# После: sudo a2enmod proxy proxy_http headers && sudo apache2ctl configtest && sudo systemctl reload apache2
+
+ProxyPass        /hooks/avito-parser/ http://127.0.0.1:9848/hooks/avito-parser/
+ProxyPassReverse /hooks/avito-parser/ http://127.0.0.1:9848/hooks/avito-parser/

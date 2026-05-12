@@ -1,0 +1,14 @@
+[Unit]
+Description=GitHub webhook redeploy for avito_parser (listen 127.0.0.1:9848)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/avito-parser-deploy-hook.env
+ExecStart=/usr/bin/python3 /opt/avito_parser/deploy/github_webhook_listener.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

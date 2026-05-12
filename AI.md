@@ -98,6 +98,14 @@
 - Удаление `before_request` auth-проверки => открытый доступ к сервису.
 - Слишком маленький `FILE_TTL_SECONDS` => пользователь может не успеть скачать результат.
 
+## Автодеплой (GitHub → VPS)
+
+- Каталог в репо: `deploy/` (`redeploy.sh`, `github_webhook_listener.py`, обёртка с `flock`, systemd unit, nginx-сниппет).
+- На одном VPS с `ai_parser`: **порт webhook 9848**, путь **`/hooks/avito-parser/`** (у `ai_parser` — 9847 и `/hooks/ai-parser/`).
+- Env на сервере: `/etc/avito-parser-deploy-hook.env` (не в git). Юнит: `avito-parser-github-hook.service`.
+- Рестарт после pull: `avito-web`, `avito-worker`, `avito-cleanup` (задаётся `SYSTEMD_RESTART_UNITS`).
+- Пошаговые SSH-команды: раздел **«Автодеплой по push»** в `README.md`.
+
 ## Быстрый smoke-check после правок
 
 1. Логин в UI проходит.

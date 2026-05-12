@@ -127,10 +127,9 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-python -m pip install gunicorn
 ```
 
-Создай `.env` в `/opt/avito_parser/.env` и укажи реальный `ROUTERAI_API_KEY`.
+`gunicorn` входит в `requirements.txt`. Создай `.env` в `/opt/avito_parser/.env` и укажи реальный `ROUTERAI_API_KEY`.
 
 ### 3. Проверка вручную (до systemd)
 
@@ -276,6 +275,154 @@ sudo ln -s /etc/nginx/sites-available/avito-parser /etc/nginx/sites-enabled/avit
 sudo nginx -t
 sudo systemctl restart nginx
 ```
+
+## Автодеплой по push (GitHub → VPS)
+
+Репозиторий: [Vladislav-dotcom/avito_parser](https://github.com/Vladislav-dotcom/avito_parser). Прод: **`/opt/avito_parser`**.
+
+**Не пересекается с `ai_parser` на том же сервере:** префикс **`/hooks/avito-parser/`**, порт слушателя **`9848`** (у `ai_parser` — `9847`).
+
+| Файл в `deploy/` | Назначение |
+|-------------------|------------|
+| `redeploy.sh` | `git pull --ff-only`, `.venv` + `pip`, `systemctl restart` из `SYSTEMD_RESTART_UNITS` |
+| `avito-parser-redeploy-wrapper.sh` | `flock` + лог `/var/log/avito-parser-redeploy.log` |
+| `github_webhook_listener.py` | HMAC `X-Hub-Signature-256`, ответ **202**, редеплой в фоне |
+| `avito-parser-github-hook.service` | systemd, `EnvironmentFile=/etc/avito-parser-deploy-hook.env` |
+| `avito-parser-deploy-hook.env.example` | шаблон секрета, ветки, порта, юнитов |
+| `nginx-avito-parser-github-hook.conf` | `location /hooks/avito-parser/` → `127.0.0.1:9848` |
+| `apache-avito-parser-github-hook-snippet.conf.example` | `ProxyPass` для Apache на `:80` |
+
+### Пошагово на VPS (SSH, копировать блоки)
+
+```bash
+ssh root@37.230.116.197
+```
+
+**0. Имена systemd (если отличаются от `avito-web` / `avito-worker` / `avito-cleanup`)**
+
+```bash
+systemctl list-units --type=service --state=running | grep -i avito
+```
+
+Дальше в примерах используются три юнита из README выше.
+
+**1. Остановка приложения**
+
+```bash
+sudo systemctl stop avito-web avito-worker avito-cleanup
+```
+
+**2. Бэкап**
+
+```bash
+sudo cp -a /opt/avito_parser "/opt/avito_parser.bak.$(date +%Y%m%d)"
+ls -la /opt/avito_parser.bak.*
+```
+
+**3. Git и клон во временный каталог**
+
+```bash
+sudo apt-get install -y git
+sudo git clone https://github.com/Vladislav-dotcom/avito_parser.git /opt/avito_parser_git
+```
+
+**4. Перенос `.env`, SQLite, `storage/` из бэкапа**
+
+Подставьте свой каталог бэкапа в `BAK` (из шага 2).
+
+```bash
+BAK=/opt/avito_parser.bak.20260512
+NEW=/opt/avito_parser_git
+export BAK NEW
+test -d "$BAK" && test -d "$NEW" || { echo "Проверь BAK и NEW"; exit 1; }
+
+sudo test -f "$BAK/.env" && sudo cp -a "$BAK/.env" "$NEW/.env" || echo "Нет .env в бэкапе — создай вручную"
+sudo test -d "$BAK/storage" && sudo cp -a "$BAK/storage" "$NEW/storage" || echo "Нет storage в бэкапе"
+```
+
+**5. Подмена каталогов**
+
+```bash
+sudo mv /opt/avito_parser /opt/avito_parser_old
+sudo mv /opt/avito_parser_git /opt/avito_parser
+```
+
+**6. Владелец (как в unit: обычно `www-data`)**
+
+```bash
+export APP_USER=www-data
+sudo chown -R "$APP_USER:$APP_USER" /opt/avito_parser
+```
+
+**7. Права на деплой-скрипты и зависимости**
+
+```bash
+sudo chmod +x /opt/avito_parser/deploy/redeploy.sh /opt/avito_parser/deploy/avito-parser-redeploy-wrapper.sh
+sudo -u "$APP_USER" bash -c 'cd /opt/avito_parser && (test -x .venv/bin/pip && .venv/bin/pip install -r requirements.txt) || (python3 -m venv .venv && .venv/bin/pip install -r requirements.txt)'
+```
+
+**8. Учётные данные GitHub для `git pull` от root (без TTY)**
+
+```bash
+sudo git config --global credential.helper store
+sudo sh -c 'printf "https://ВАШ_ЛОГИН_GITHUB:ВАШ_PAT@github.com\n" > /root/.git-credentials'
+sudo chmod 600 /root/.git-credentials
+sudo git config --global --add safe.directory /opt/avito_parser
+sudo git -c safe.directory=/opt/avito_parser -C /opt/avito_parser ls-remote origin HEAD
+```
+
+**9. Секрет webhook и env**
+
+```bash
+openssl rand -hex 32
+sudo cp /opt/avito_parser/deploy/avito-parser-deploy-hook.env.example /etc/avito-parser-deploy-hook.env
+sudo chmod 600 /etc/avito-parser-deploy-hook.env
+sudo nano /etc/avito-parser-deploy-hook.env
+```
+
+В файле: `GITHUB_WEBHOOK_SECRET` (тот же hex + тот же в GitHub Webhook), `DEPLOY_BRANCH=main`, `DEPLOY_ROOT=/opt/avito_parser`, `SYSTEMD_RESTART_UNITS=avito-web avito-worker avito-cleanup`, `WEBHOOK_LISTEN_PORT=9848`, `WEBHOOK_LISTEN_HOST=127.0.0.1`.
+
+**10. systemd hook**
+
+```bash
+sudo cp /opt/avito_parser/deploy/avito-parser-github-hook.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now avito-parser-github-hook.service
+sudo systemctl status avito-parser-github-hook.service --no-pager
+curl -fsS http://127.0.0.1:9848/hooks/avito-parser/health
+```
+
+**11. Nginx на `:80`** — в активный `server { }` добавьте строку:
+
+```nginx
+include /etc/nginx/snippets/avito-parser-github-hook.conf;
+```
+
+Подготовка сниппета и reload:
+
+```bash
+sudo tee /etc/nginx/snippets/avito-parser-github-hook.conf >/dev/null </opt/avito_parser/deploy/nginx-avito-parser-github-hook.conf
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+**Порт 80 занят Apache** — вставьте строки из `deploy/apache-avito-parser-github-hook-snippet.conf.example` в нужный vhost **выше** общего `ProxyPass /`, затем `sudo apache2ctl configtest && sudo systemctl reload apache2`.
+
+**Без правок веб-сервера** (как у `ai_parser`): в `/etc/avito-parser-deploy-hook.env` задайте `WEBHOOK_LISTEN_HOST=0.0.0.0`, откройте UFW `9848/tcp`, в GitHub URL: **`http://37.230.116.197:9848/hooks/avito-parser/`**, слушатель перезапустите: `sudo systemctl restart avito-parser-github-hook.service`.
+
+**12. GitHub → Settings → Webhooks**
+
+- Payload URL: `http://37.230.116.197/hooks/avito-parser/` (nginx/apache) **или** `http://37.230.116.197:9848/hooks/avito-parser/` (прямой порт)
+- Content type: **application/json**, Secret из шага 9, события: **Just the push event**
+
+**13. Запуск приложения и проверка**
+
+```bash
+sudo systemctl start avito-web avito-worker avito-cleanup
+sudo systemctl status avito-web avito-worker avito-cleanup --no-pager
+sudo tail -n 30 /var/log/avito-parser-redeploy.log
+```
+
+После пуша в `main` смотрите тот же лог и `sudo journalctl -u avito-parser-github-hook.service -n 30 --no-pager`.
 
 ## Логи и диагностика
 
