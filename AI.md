@@ -1,5 +1,11 @@
 # AI.md — контекст проекта
 
+## Репозиторий (GitHub)
+
+- URL: https://github.com/Vladislav-dotcom/avito_parser
+- Ветка по умолчанию: `main`
+- Локально: отдельный git в каталоге `avito_parser` (не путать с монорепо `D:/SERVERS/OLNISA`).
+
 ## Что это за сервис
 
 `avito_parser` — веб-сервис для AI-обработки XLSX-файлов с данными по товарам (Avito-парсинг).
