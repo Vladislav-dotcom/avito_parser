@@ -107,6 +107,20 @@
 - Рестарт после pull: `avito-web`, `avito-worker`, `avito-cleanup` (задаётся `SYSTEMD_RESTART_UNITS`).
 - Пошаговые SSH-команды: раздел **«Автодеплой по push»** в `README.md`.
 
+### Если в GitHub: «We couldn't deliver this payload: timed out»
+
+Это не сбой агента в репозитории: GitHub **не получил HTTP-ответ** от Payload URL за отведённое время (порядка **10 с**). Обработчик `deploy/github_webhook_listener.py` сразу ставит деплой в фон и отдаёт **202** — при типичном таймауте проблема **до** приложения: сеть, firewall, nginx, юнит не слушает порт.
+
+Проверить по приоритету:
+
+1. На VPS: `systemctl status avito-parser-github-hook` — процесс жив, слушает `127.0.0.1:9848`.
+2. `curl -sS -m 5 http://127.0.0.1:9848/health` с сервера — JSON `status: ok`.
+3. С **внешней** машины (не с VPS): тот же URL, что в GitHub (**HTTPS/HTTP как в настройках**), например `curl -m 15 -v https://домен/hooks/avito-parser/` — должен быстро ответить (GET health, если путь совпадает с конфигом nginx).
+4. Firewall / security group: **входящие** на 443 (или 80, если так настроено) не DROP без ответа — иначе клиент долго ждёт и таймаутится.
+5. Nginx: `nginx -t`, лог ошибок upstream; при мёртвом бэкенде см. `proxy_connect_timeout` в `deploy/nginx-avito-parser-github-hook.conf`.
+
+Повторная доставка с тем же результатом означает стабильную недоступность или зависание цепочки до ответа, а не разовый сбой GitHub.
+
 ## Быстрый smoke-check после правок
 
 1. Логин в UI проходит.
