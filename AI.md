@@ -109,15 +109,17 @@
 
 ### Если в GitHub: «We couldn't deliver this payload: timed out»
 
-Это не сбой агента в репозитории: GitHub **не получил HTTP-ответ** от Payload URL за отведённое время (порядка **10 с**). Обработчик `deploy/github_webhook_listener.py` сразу ставит деплой в фон и отдаёт **202** — при типичном таймауте проблема **до** приложения: сеть, firewall, nginx, юнит не слушает порт.
+Это не сбой агента в репозитории: GitHub **не получил HTTP-ответ** за ~10 с. Обработчик сразу ставит деплой в фон и отдаёт **202** — если ответа нет, ищи обрыв сети/nginx **или** зависший однопоточный приём (см. ниже), а не «медленный» сам деплой в том же HTTP-запросе.
 
 Проверить по приоритету:
 
-1. На VPS: `systemctl status avito-parser-github-hook` — процесс жив, слушает `127.0.0.1:9848`.
-2. `curl -sS -m 5 http://127.0.0.1:9848/health` с сервера — JSON `status: ok`.
-3. С **внешней** машины (не с VPS): тот же URL, что в GitHub (**HTTPS/HTTP как в настройках**), например `curl -m 15 -v https://домен/hooks/avito-parser/` — должен быстро ответить (GET health, если путь совпадает с конфигом nginx).
-4. Firewall / security group: **входящие** на 443 (или 80, если так настроено) не DROP без ответа — иначе клиент долго ждёт и таймаутится.
-5. Nginx: `nginx -t`, лог ошибок upstream; при мёртвом бэкенде см. `proxy_connect_timeout` в `deploy/nginx-avito-parser-github-hook.conf`.
+1. На VPS: `systemctl status avito-parser-github-hook` — процесс жив; порт смотри в env (`WEBHOOK_LISTEN_HOST`: часто `127.0.0.1`, у тебя может быть `0.0.0.0:9848`).
+2. `curl -sS -m 5 http://127.0.0.1:9848/health` с сервера — JSON `status: ok`. На **9848 только HTTP**, не TLS: `https://...:9848` даст зависание на рукопожатии — проверяй `http://`.
+3. С **внешней** машины: тот же URL, что в GitHub. Если `https://IP:443` → `connection refused`, nginx на 443 не слушает — либо подними прокси, либо вебхук на **http://** по схеме из `deploy/nginx-avito-parser-github-hook.conf` (там пример с `http://37.230.116.197/...`).
+4. Firewall: входящие не DROP без ответа.
+5. Nginx: `nginx -t`, лог upstream; таймауты в `deploy/nginx-avito-parser-github-hook.conf`.
+
+Если `systemctl` показывает `running`, а `curl http://127.0.0.1:9848/health` **всё равно** таймаутится долгое время — типичная причина: старый однопоточный `HTTPServer` занят одним «зависшим» соединением (неполный POST и т.п.), остальные запросы не обрабатываются. В репо слушатель переведён на `ThreadingHTTPServer`; после деплоя при зависании достаточно `systemctl restart avito-parser-github-hook`.
 
 Повторная доставка с тем же результатом означает стабильную недоступность или зависание цепочки до ответа, а не разовый сбой GitHub.
 

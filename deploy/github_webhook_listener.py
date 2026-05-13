@@ -12,7 +12,7 @@ import json
 import os
 import subprocess
 import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, unquote
@@ -160,7 +160,9 @@ def main() -> None:
     host = os.environ.get("WEBHOOK_LISTEN_HOST", "127.0.0.1")
     port = int(os.environ.get("WEBHOOK_LISTEN_PORT", str(DEFAULT_PORT)))
     _ = _env("GITHUB_WEBHOOK_SECRET")
-    httpd = HTTPServer((host, port), Handler)
+    # ThreadingHTTPServer: один зависший POST (медленный клиент / неполное тело)
+    # не блокирует остальные запросы и GET /health — иначе GitHub видит timeout.
+    httpd = ThreadingHTTPServer((host, port), Handler)
     sys.stderr.write(
         f"github_webhook_listener: listen={host}:{port} "
         f"POST / or {_HOOK_PREFIX}; GET /health or {_HOOK_PREFIX}/health\n"
