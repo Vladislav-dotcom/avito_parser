@@ -122,6 +122,15 @@
 
 Повторная доставка с тем же результатом означает стабильную недоступность или зависание цепочки до ответа, а не разовый сбой GitHub.
 
+## Cursor Skills (глобальные, пользователю)
+
+- Менеджер: `npx skills` (CLI `vercel-labs/skills`).
+- Установленный skill: **frontend-design** (от `anthropics/skills`) — генерация качественных production-frontend UI (HTML/CSS, React и т.п.).
+- Локация: `~/.agents/skills/frontend-design/SKILL.md` (Cursor IDE подхватывает её как user-level skill автоматически — см. [docs](https://cursor.com/docs/context/skills)).
+- Установка: `npx skills add https://github.com/anthropics/skills --skill frontend-design -g -y`.
+- Просмотр в IDE: Settings → Rules → раздел *Agent Decides*. Ручной вызов в чате: `/frontend-design`.
+- **RouterAI API** (интеграция/доки RouterAI): персональный skill `~/.cursor/skills/routerai-api/SKILL.md` + `reference.md`; в чате подключать явно (`@routerai-api` / выбор skill), `disable-model-invocation: true` — не подхватывается без явного указания пользователя на RouterAI.
+
 ## Быстрый smoke-check после правок
 
 1. Логин в UI проходит.
