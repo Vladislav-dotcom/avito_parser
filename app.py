@@ -15,6 +15,12 @@ from services.cleanup_service import cleanup_expired_files, schedule_file_deleti
 from services.db_service import init_db
 from services.job_service import enqueue_parse_job, get_job_by_id
 from services.logging_config import configure_logging
+from services.supplier_service import (
+    SupplierValidationError,
+    create_supplier,
+    get_all_suppliers,
+    get_supplier,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,9 +111,31 @@ def create_app() -> Flask:
     def index():
         return render_template("index.html")
 
+    @app.get("/api/suppliers")
+    def list_suppliers_api():
+        suppliers = get_all_suppliers()
+        return jsonify({"suppliers": suppliers})
+
+    @app.post("/api/suppliers")
+    def create_supplier_api():
+        payload = request.get_json(silent=True) or {}
+        name = str(payload.get("name", ""))
+        letter = str(payload.get("letter", ""))
+        try:
+            supplier = create_supplier(name=name, letter=letter)
+        except SupplierValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"supplier": supplier}), 201
+
     @app.post("/api/upload")
     def upload_file():
         cleanup_expired_files()
+        supplier_id = str(request.form.get("supplier_id", "")).strip()
+        if not supplier_id:
+            return jsonify({"error": "Выберите поставщика."}), 400
+        if get_supplier(supplier_id) is None:
+            return jsonify({"error": "Поставщик не найден."}), 400
+
         file = request.files.get("file")
         if file is None or file.filename is None or file.filename == "":
             return jsonify({"error": "Файл не выбран."}), 400
@@ -119,7 +147,11 @@ def create_app() -> Flask:
         upload_path = Path(Config.UPLOAD_DIR) / upload_name
         file.save(upload_path)
 
-        job_id = enqueue_parse_job(upload_path=upload_path, original_filename=file.filename)
+        job_id = enqueue_parse_job(
+            upload_path=upload_path,
+            original_filename=file.filename,
+            supplier_id=supplier_id,
+        )
         logger.info("Файл поставлен в очередь", extra={"job_id": job_id})
         return jsonify({"job_id": job_id, "message": "Файл загружен. Анализ запущен."})
 

@@ -9,13 +9,21 @@ from services.ai_service import parse_description
 from services.cleanup_service import schedule_file_deletion
 from services.db_service import (
     fail_job,
+    fetch_job,
     finish_job,
     get_connection,
     update_job_progress,
     update_job_state,
     update_job_total_rows,
 )
-from services.excel_service import build_result_dataframe, read_excel, validate_columns, write_excel
+from services.excel_service import (
+    build_result_dataframe,
+    format_export_for_1c,
+    read_excel,
+    validate_columns,
+    write_excel,
+)
+from services.supplier_service import get_supplier
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +41,19 @@ def _get_job_paths(job_id: str) -> tuple[Path, str]:
 
 def process_xlsx_job(job_id: str) -> dict[str, str]:
     upload_path, original_filename = _get_job_paths(job_id)
+    job = fetch_job(job_id)
+    if job is None:
+        raise ValueError(f"Job not found: {job_id}")
+
+    supplier_id = job.get("supplier_id")
+    if not supplier_id:
+        fail_job(job_id=job_id, error="Не указан поставщик для задачи.")
+        raise ValueError("Не указан поставщик для задачи.")
+
+    supplier = get_supplier(str(supplier_id))
+    if supplier is None:
+        fail_job(job_id=job_id, error="Поставщик для задачи не найден.")
+        raise ValueError("Поставщик для задачи не найден.")
 
     try:
         dataframe = read_excel(upload_path)
@@ -63,6 +84,7 @@ def process_xlsx_job(job_id: str) -> dict[str, str]:
 
         update_job_state(job_id=job_id, state="finalizing")
         result_dataframe = build_result_dataframe(dataframe, parsed_rows)
+        result_dataframe = format_export_for_1c(result_dataframe, supplier["letter"])
         output_name = f"{upload_path.stem}_processed_{uuid4().hex[:8]}.xlsx"
         result_path = Path(Config.RESULT_DIR) / output_name
         write_excel(result_dataframe, result_path)

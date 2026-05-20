@@ -3,6 +3,12 @@ const uploadBtn = document.getElementById("uploadBtn");
 const statusBox = document.getElementById("statusBox");
 const progressBar = document.getElementById("progressBar");
 const downloadBtn = document.getElementById("downloadBtn");
+const supplierSelect = document.getElementById("supplierId");
+const fileInput = document.getElementById("fileInput");
+const addSupplierBtn = document.getElementById("addSupplierBtn");
+const newSupplierNameInput = document.getElementById("newSupplierName");
+const newSupplierLetterInput = document.getElementById("newSupplierLetter");
+const supplierFormError = document.getElementById("supplierFormError");
 const STORAGE_KEY = "avito_parser_current_job_id";
 
 let pollingTimer = null;
@@ -18,6 +24,91 @@ function setProgress(value) {
   const progress = Math.max(0, Math.min(100, Number(value || 0)));
   progressBar.style.width = `${progress}%`;
   progressBar.textContent = `${progress}%`;
+}
+
+function showSupplierFormError(message) {
+  if (!message) {
+    supplierFormError.classList.add("d-none");
+    supplierFormError.textContent = "";
+    return;
+  }
+  supplierFormError.textContent = message;
+  supplierFormError.classList.remove("d-none");
+}
+
+function updateUploadButtonState() {
+  if (pollingTimer) {
+    return;
+  }
+  const hasSupplier = Boolean(supplierSelect && supplierSelect.value);
+  const hasFile = Boolean(fileInput && fileInput.files && fileInput.files.length > 0);
+  uploadBtn.disabled = !(hasSupplier && hasFile);
+}
+
+function fillSupplierSelect(suppliers, selectedId = "") {
+  if (!supplierSelect) {
+    return;
+  }
+  const previousValue = selectedId || supplierSelect.value;
+  supplierSelect.innerHTML = '<option value="">Выберите поставщика</option>';
+  suppliers.forEach((supplier) => {
+    const option = document.createElement("option");
+    option.value = supplier.id;
+    option.textContent = `${supplier.name} (${supplier.letter})`;
+    supplierSelect.appendChild(option);
+  });
+  if (previousValue) {
+    supplierSelect.value = previousValue;
+  }
+  updateUploadButtonState();
+}
+
+async function loadSuppliers() {
+  const response = await fetch("/api/suppliers");
+  if (response.status === 401) {
+    throw new Error("Сессия истекла. Выполни вход снова.");
+  }
+  if (!response.ok) {
+    throw new Error("Не удалось загрузить список поставщиков.");
+  }
+  const payload = await response.json();
+  fillSupplierSelect(payload.suppliers || []);
+}
+
+async function addSupplier() {
+  const name = newSupplierNameInput.value.trim();
+  const letter = newSupplierLetterInput.value.trim();
+  showSupplierFormError("");
+
+  if (!name || !letter) {
+    showSupplierFormError("Укажите имя и букву поставщика.");
+    return;
+  }
+
+  addSupplierBtn.disabled = true;
+  try {
+    const response = await fetch("/api/suppliers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, letter }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "Не удалось добавить поставщика.");
+    }
+
+    await loadSuppliers();
+    if (payload.supplier && payload.supplier.id) {
+      supplierSelect.value = payload.supplier.id;
+    }
+    newSupplierNameInput.value = "";
+    newSupplierLetterInput.value = "";
+    updateUploadButtonState();
+  } catch (error) {
+    showSupplierFormError(error.message);
+  } finally {
+    addSupplierBtn.disabled = false;
+  }
 }
 
 function resetDownloadButton() {
@@ -121,9 +212,9 @@ function applyStatusToUI(jobId, status) {
   if (state === "failed") {
     setStatus(`Ошибка: ${status.error || "неизвестно"}`, "danger");
     resetDownloadButton();
-    uploadBtn.disabled = false;
     clearCurrentJobId();
     stopPolling();
+    updateUploadButtonState();
     return;
   }
 
@@ -131,7 +222,7 @@ function applyStatusToUI(jobId, status) {
     setStatus("Анализ завершен. Можно скачать файл.", "success");
     setProgress(100);
     enableDownloadButton(jobId);
-    uploadBtn.disabled = false;
+    updateUploadButtonState();
     if (completionNotifiedForJobId !== jobId) {
       playCompletionSound();
       completionNotifiedForJobId = jobId;
@@ -150,7 +241,7 @@ async function pollOnce(jobId) {
     applyStatusToUI(jobId, status);
   } catch (error) {
     setStatus(error.message, "danger");
-    uploadBtn.disabled = false;
+    updateUploadButtonState();
     stopPolling();
   }
 }
@@ -199,7 +290,7 @@ uploadForm.addEventListener("submit", async (event) => {
     startPolling(payload.job_id);
   } catch (error) {
     setStatus(error.message, "danger");
-    uploadBtn.disabled = false;
+    updateUploadButtonState();
   }
 });
 
@@ -207,13 +298,27 @@ downloadBtn.addEventListener("click", () => {
   if (!downloadBtn.classList.contains("disabled")) {
     setTimeout(() => {
       clearCurrentJobId();
-      uploadBtn.disabled = false;
+      updateUploadButtonState();
       setStatus("Файл скачивается. Можно загрузить новый файл.", "success");
       completionNotifiedForJobId = null;
       resetDownloadButton();
       setProgress(0);
     }, 500);
   }
+});
+
+if (supplierSelect) {
+  supplierSelect.addEventListener("change", updateUploadButtonState);
+}
+if (fileInput) {
+  fileInput.addEventListener("change", updateUploadButtonState);
+}
+if (addSupplierBtn) {
+  addSupplierBtn.addEventListener("click", addSupplier);
+}
+
+loadSuppliers().catch((error) => {
+  setStatus(error.message, "danger");
 });
 
 restoreJobStateOnLoad();

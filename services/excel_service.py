@@ -25,6 +25,13 @@ _FIELD_MAP = {
     "Описание": "generated_description",
 }
 
+SUPPLIER_LETTER_SUFFIX_SEP = " "
+EXPORT_COLUMN_RENAMES = {
+    "Наименование": "название",
+    "Бренд": "производитель",
+    "Артикул": "артикул",
+}
+
 
 def _has_article(value: object) -> bool:
     if value is None:
@@ -68,6 +75,27 @@ def build_result_dataframe(dataframe: pd.DataFrame, parsed_rows: Iterable[list[d
             exploded_rows.append(out_row)
 
     return pd.DataFrame(exploded_rows)
+
+
+def append_supplier_letter(article: object, letter: str) -> object:
+    if article is None or (isinstance(article, float) and pd.isna(article)):
+        return article
+    article_text = str(article).strip()
+    if not article_text:
+        return article
+    suffix = f"{SUPPLIER_LETTER_SUFFIX_SEP}{letter}"
+    if article_text.endswith(suffix):
+        return article_text
+    return f"{article_text}{suffix}"
+
+
+def format_export_for_1c(dataframe: pd.DataFrame, supplier_letter: str) -> pd.DataFrame:
+    result = dataframe.copy()
+    if "Артикул" in result.columns:
+        result["Артикул"] = result["Артикул"].apply(
+            lambda value: append_supplier_letter(value, supplier_letter)
+        )
+    return result.rename(columns=EXPORT_COLUMN_RENAMES)
 
 
 def write_excel(dataframe: pd.DataFrame, target_path: Path) -> None:

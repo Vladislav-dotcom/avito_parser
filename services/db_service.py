@@ -9,6 +9,14 @@ from typing import Iterator, Optional
 
 from config import Config
 
+DEFAULT_SUPPLIERS: list[tuple[str, str]] = [
+    ("Еремеев", "Е"),
+    ("Неботов", "Н"),
+    ("Усмамбаев", "У"),
+    ("Сергей", "С"),
+    ("plc:Store", "Д"),
+]
+
 
 def _db_path() -> Path:
     return Path(Config.SQLITE_DB_PATH)
@@ -57,12 +65,83 @@ def init_db() -> None:
                 ON jobs(state, created_at);
             CREATE INDEX IF NOT EXISTS idx_cleanup_due
                 ON cleanup_schedule(processed, delete_after_ts);
+
+            CREATE TABLE IF NOT EXISTS suppliers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                letter TEXT NOT NULL UNIQUE,
+                created_at INTEGER NOT NULL
+            );
             """
         )
+        _ensure_jobs_supplier_id_column(conn)
+        _seed_default_suppliers(conn)
         conn.commit()
 
 
-def create_job(upload_path: Path, original_filename: str) -> str:
+def _ensure_jobs_supplier_id_column(conn: sqlite3.Connection) -> None:
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
+    }
+    if "supplier_id" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN supplier_id TEXT")
+
+
+def _seed_default_suppliers(conn: sqlite3.Connection) -> None:
+    count = conn.execute("SELECT COUNT(*) FROM suppliers").fetchone()[0]
+    if count:
+        return
+    now_ts = int(time())
+    for name, letter in DEFAULT_SUPPLIERS:
+        conn.execute(
+            """
+            INSERT INTO suppliers (id, name, letter, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (uuid.uuid4().hex, name, letter, now_ts),
+        )
+
+
+def list_suppliers() -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, name, letter, created_at
+            FROM suppliers
+            ORDER BY name COLLATE NOCASE ASC
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_supplier_by_id(supplier_id: str) -> Optional[dict]:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id, name, letter, created_at FROM suppliers WHERE id = ?",
+            (supplier_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def insert_supplier(name: str, letter: str) -> dict:
+    supplier_id = uuid.uuid4().hex
+    now_ts = int(time())
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO suppliers (id, name, letter, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (supplier_id, name, letter, now_ts),
+        )
+        conn.commit()
+    supplier = get_supplier_by_id(supplier_id)
+    if supplier is None:
+        raise RuntimeError("Не удалось создать поставщика.")
+    return supplier
+
+
+def create_job(upload_path: Path, original_filename: str, supplier_id: str) -> str:
     job_id = uuid.uuid4().hex
     now_ts = int(time())
     with get_connection() as conn:
@@ -70,10 +149,10 @@ def create_job(upload_path: Path, original_filename: str) -> str:
             """
             INSERT INTO jobs (
                 id, state, upload_path, result_path, original_filename,
-                total_rows, processed_rows, failed_rows, error, created_at
-            ) VALUES (?, 'queued', ?, '', ?, 0, 0, 0, NULL, ?)
+                total_rows, processed_rows, failed_rows, error, created_at, supplier_id
+            ) VALUES (?, 'queued', ?, '', ?, 0, 0, 0, NULL, ?, ?)
             """,
-            (job_id, str(upload_path), original_filename, now_ts),
+            (job_id, str(upload_path), original_filename, now_ts, supplier_id),
         )
         conn.commit()
     return job_id

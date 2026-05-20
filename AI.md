@@ -32,13 +32,24 @@
 - `Категория`
 - `Описание`
 
-Добавляемые выходные колонки:
+Добавляемые выходные колонки (после AI, до финального экспорта):
 - `Бренд`
 - `Артикул`
 - `Цена`
 - `Кол-во`
 - `Состояние`
 - `Описание` (AI-сгенерированное краткое техническое описание товара)
+
+### Экспорт под 1С (единственный формат результата)
+
+- **Один XLSX = один поставщик**: перед загрузкой в UI обязателен выбор из справочника `suppliers`.
+- Справочник в SQLite (`suppliers`): сид — Еремеев/Е, Неботов/Н, Усмамбаев/У, Сергей/С, plc:Store/Д; в UI можно добавить нового (имя + уникальная буква).
+- В `jobs` хранится `supplier_id` — worker подставляет букву в артикул.
+- Финальный XLSX (`format_export_for_1c` в `services/excel_service.py`):
+  - к `Артикул` дописывается ` {буква}` (один пробел), если суффикса выбранного поставщика ещё нет;
+  - переименование: `Наименование`→`название`, `Бренд`→`производитель`, `Артикул`→`артикул`;
+  - остальные колонки без изменений (все входные + AI-поля).
+- API: `GET/POST /api/suppliers`, в `POST /api/upload` — поле `supplier_id`.
 
 ## Текущая архитектура (важно)
 
@@ -85,8 +96,9 @@
 ## Где что править
 
 - API и auth: `app.py`
-- Очередь/БД: `services/db_service.py`, `services/job_service.py`
+- Очередь/БД/поставщики: `services/db_service.py`, `services/supplier_service.py`, `services/job_service.py`
 - Пайплайн обработки: `tasks.py`
+- Формат 1С в Excel: `services/excel_service.py` (`format_export_for_1c`, `append_supplier_letter`)
 - Очистка файлов: `services/cleanup_service.py`, `worker.py --mode cleanup`
 - AI парсинг и retry: `services/ai_service.py`
 - UI/polling: `static/app.js`, `templates/index.html`, `templates/login.html`
