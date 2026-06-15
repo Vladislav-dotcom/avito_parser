@@ -134,6 +134,31 @@
 
 Повторная доставка с тем же результатом означает стабильную недоступность или зависание цепочки до ответа, а не разовый сбой GitHub.
 
+## Инструменты агента (CLI, глобальные)
+
+### markitdown — конвертация файлов в Markdown
+
+- **Установка**: `markitdown` + `markitdown-mcp` из `D:\PROGRAMS\markitdown` (editable install)
+- **cli-use alias**: `markitdown` (зарегистрирован глобально)
+- **Использование** (token-efficient, ~60–80% дешевле MCP):
+  ```bash
+  cli-use markitdown convert_to_markdown --uri "file:///D:/path/to/file.xlsx"
+  ```
+- **Прямой CLI** (ещё проще):
+  ```bash
+  markitdown "D:\path\to\file.xlsx"
+  ```
+- **Форматы**: xlsx, xls, pdf, docx, pptx, csv, json, xml, html, zip, изображения, YouTube URL
+- **SKILL.md**: `~/.agents/skills/markitdown/SKILL.md` — глобальный, Cursor подхватывает автоматически
+- **Важно для путей Windows**: `D:\папка\файл.xlsx` → URI `file:///D:/папка/файл.xlsx`
+
+### cli-use (глобальный враппер MCP→CLI)
+
+- **Установка**: `D:\PROGRAMS\cli_use\cli-use` (editable install), версия 0.3.0
+- **Зарегистрированные aliases**: `fs`, `gh`, `memory`, `puppeteer`, `brave`, `slack`, `markitdown`
+- **Конфиг aliases**: `C:\Users\wayks\.cli-use\aliases.json`
+- **Смысл**: превращает MCP-сервер в CLI-команду, экономя 60–80% токенов на schema discovery и JSON-RPC overhead
+
 ## Cursor Skills (глобальные, пользователю)
 
 - Менеджер: `npx skills` (CLI `vercel-labs/skills`).
@@ -142,6 +167,12 @@
 - Установка: `npx skills add https://github.com/anthropics/skills --skill frontend-design -g -y`.
 - Просмотр в IDE: Settings → Rules → раздел *Agent Decides*. Ручной вызов в чате: `/frontend-design`.
 - **RouterAI API** (интеграция/доки RouterAI): глобальный skill `~/.agents/skills/routerai-api/SKILL.md` + `reference.md` (как остальные user-level skills); в чате подключать явно (`@routerai-api` / выбор skill), `disable-model-invocation: true` — не подхватывается без явного указания пользователя на RouterAI.
+
+## Связанный инструмент excel_editor
+
+Каталоги radioelementy («Папка бренда», «Название производителя») чистятся отдельным CLI в `../excel_editor/`:
+- полный прогон: `clean_excel.py`
+- только бренды в готовом XLSX: `clean_brands_only.py` (без повторного AI)
 
 ## Быстрый smoke-check после правок
 
