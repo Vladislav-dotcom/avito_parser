@@ -9,12 +9,12 @@ from typing import Iterator, Optional
 
 from config import Config
 
-DEFAULT_SUPPLIERS: list[tuple[str, str]] = [
-    ("Еремеев", "Е"),
-    ("Неботов", "Н"),
-    ("Усмамбаев", "У"),
-    ("Сергей", "С"),
-    ("plc:Store", "Д"),
+DEFAULT_SUPPLIERS: list[str] = [
+    "Еремеев",
+    "Неботов",
+    "Усмамбаев",
+    "Сергей",
+    "plc:Store",
 ]
 
 
@@ -51,7 +51,8 @@ def init_db() -> None:
                 error TEXT,
                 created_at INTEGER NOT NULL,
                 started_at INTEGER,
-                finished_at INTEGER
+                finished_at INTEGER,
+                last_progress_at INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS cleanup_schedule (
@@ -69,12 +70,13 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS suppliers (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
-                letter TEXT NOT NULL UNIQUE,
                 created_at INTEGER NOT NULL
             );
             """
         )
         _ensure_jobs_supplier_id_column(conn)
+        _ensure_jobs_last_progress_at_column(conn)
+        _migrate_suppliers_remove_letter(conn)
         _seed_default_suppliers(conn)
         conn.commit()
 
@@ -87,18 +89,51 @@ def _ensure_jobs_supplier_id_column(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE jobs ADD COLUMN supplier_id TEXT")
 
 
+def _ensure_jobs_last_progress_at_column(conn: sqlite3.Connection) -> None:
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
+    }
+    if "last_progress_at" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN last_progress_at INTEGER")
+
+
+def _migrate_suppliers_remove_letter(conn: sqlite3.Connection) -> None:
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(suppliers)").fetchall()
+    }
+    if "letter" not in columns:
+        return
+    conn.execute(
+        """
+        CREATE TABLE suppliers_new (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            created_at INTEGER NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO suppliers_new (id, name, created_at)
+        SELECT id, name, created_at FROM suppliers
+        """
+    )
+    conn.execute("DROP TABLE suppliers")
+    conn.execute("ALTER TABLE suppliers_new RENAME TO suppliers")
+
+
 def _seed_default_suppliers(conn: sqlite3.Connection) -> None:
     count = conn.execute("SELECT COUNT(*) FROM suppliers").fetchone()[0]
     if count:
         return
     now_ts = int(time())
-    for name, letter in DEFAULT_SUPPLIERS:
+    for name in DEFAULT_SUPPLIERS:
         conn.execute(
             """
-            INSERT INTO suppliers (id, name, letter, created_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO suppliers (id, name, created_at)
+            VALUES (?, ?, ?)
             """,
-            (uuid.uuid4().hex, name, letter, now_ts),
+            (uuid.uuid4().hex, name, now_ts),
         )
 
 
@@ -106,7 +141,7 @@ def list_suppliers() -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT id, name, letter, created_at
+            SELECT id, name, created_at
             FROM suppliers
             ORDER BY name COLLATE NOCASE ASC
             """
@@ -117,22 +152,22 @@ def list_suppliers() -> list[dict]:
 def get_supplier_by_id(supplier_id: str) -> Optional[dict]:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT id, name, letter, created_at FROM suppliers WHERE id = ?",
+            "SELECT id, name, created_at FROM suppliers WHERE id = ?",
             (supplier_id,),
         ).fetchone()
     return dict(row) if row else None
 
 
-def insert_supplier(name: str, letter: str) -> dict:
+def insert_supplier(name: str) -> dict:
     supplier_id = uuid.uuid4().hex
     now_ts = int(time())
     with get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO suppliers (id, name, letter, created_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO suppliers (id, name, created_at)
+            VALUES (?, ?, ?)
             """,
-            (supplier_id, name, letter, now_ts),
+            (supplier_id, name, now_ts),
         )
         conn.commit()
     supplier = get_supplier_by_id(supplier_id)
@@ -172,13 +207,26 @@ def requeue_stale_processing_jobs(stale_seconds: int) -> int:
             UPDATE jobs
             SET state = 'queued', started_at = NULL, error = 'job_requeued_after_stale_timeout'
             WHERE state = 'processing'
-              AND started_at IS NOT NULL
-              AND started_at < ?
+              AND COALESCE(last_progress_at, started_at) IS NOT NULL
+              AND COALESCE(last_progress_at, started_at) < ?
             """,
             (threshold,),
         )
         conn.commit()
         return cursor.rowcount
+
+
+def release_job_to_queue(job_id: str) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE jobs
+            SET state = 'queued', started_at = NULL, error = 'job_released_for_shutdown'
+            WHERE id = ? AND state = 'processing'
+            """,
+            (job_id,),
+        )
+        conn.commit()
 
 
 def claim_next_job() -> Optional[dict]:
@@ -202,24 +250,25 @@ def claim_next_job() -> Optional[dict]:
         conn.execute(
             """
             UPDATE jobs
-            SET state = 'processing', started_at = ?, error = NULL
+            SET state = 'processing', started_at = ?, last_progress_at = ?, error = NULL
             WHERE id = ? AND state = 'queued'
             """,
-            (now_ts, job_id),
+            (now_ts, now_ts, job_id),
         )
         conn.commit()
     return fetch_job(job_id)
 
 
 def update_job_progress(job_id: str, processed_rows: int, failed_rows: int) -> None:
+    now_ts = int(time())
     with get_connection() as conn:
         conn.execute(
             """
             UPDATE jobs
-            SET processed_rows = ?, failed_rows = ?
+            SET processed_rows = ?, failed_rows = ?, last_progress_at = ?
             WHERE id = ?
             """,
-            (processed_rows, failed_rows, job_id),
+            (processed_rows, failed_rows, now_ts, job_id),
         )
         conn.commit()
 

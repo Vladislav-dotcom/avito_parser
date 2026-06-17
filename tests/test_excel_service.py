@@ -3,7 +3,6 @@ import pytest
 
 from services.excel_service import (
     EXPECTED_COLUMNS,
-    append_supplier_letter,
     build_result_dataframe,
     format_export_for_1c,
     validate_columns,
@@ -133,19 +132,7 @@ def test_build_result_dataframe_skips_rows_without_article():
     assert result["Описание"].tolist() == ["Описание IFM"]
 
 
-def test_append_supplier_letter_adds_suffix():
-    assert append_supplier_letter("12345", "Е") == "12345 Е"
-
-
-def test_append_supplier_letter_skips_duplicate():
-    assert append_supplier_letter("12345 Е", "Е") == "12345 Е"
-
-
-def test_append_supplier_letter_adds_different_supplier_letter():
-    assert append_supplier_letter("12345 Е", "Н") == "12345 Е Н"
-
-
-def test_format_export_for_1c_renames_columns_and_updates_article():
+def test_format_export_for_1c_renames_columns():
     dataframe = pd.DataFrame(
         [
             {
@@ -156,13 +143,13 @@ def test_format_export_for_1c_renames_columns_and_updates_article():
             }
         ]
     )
-    result = format_export_for_1c(dataframe, "Е")
+    result = format_export_for_1c(dataframe)
     assert "название" in result.columns
     assert "производитель" in result.columns
     assert "артикул" in result.columns
     assert "Наименование" not in result.columns
     assert "Бренд" not in result.columns
     assert "Артикул" not in result.columns
-    assert result["артикул"].iloc[0] == "A-123 Е"
+    assert result["артикул"].iloc[0] == "A-123"
     assert result["название"].iloc[0] == "Позиция"
     assert result["производитель"].iloc[0] == "ABB"

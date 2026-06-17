@@ -38,8 +38,15 @@ _step 4 "pip install -r requirements.txt"
 
 _step 5 "systemctl restart: ${UNITS}"
 for u in ${UNITS}; do
-  echo "    restart ${u}.service"
-  systemctl restart "${u}.service" || echo "    предупреждение: не удалось перезапустить ${u}.service (имя юнита или права)" >&2
+  if [[ "${u}" == "avito-worker" ]]; then
+    echo "    stop ${u}.service (graceful)"
+    systemctl stop "${u}.service" || echo "    предупреждение: не удалось остановить ${u}.service" >&2
+    echo "    start ${u}.service"
+    systemctl start "${u}.service" || echo "    предупреждение: не удалось запустить ${u}.service" >&2
+  else
+    echo "    restart ${u}.service"
+    systemctl restart "${u}.service" || echo "    предупреждение: не удалось перезапустить ${u}.service (имя юнита или права)" >&2
+  fi
 done
 
 echo "[done] Редеплой завершён $(date -Is)"

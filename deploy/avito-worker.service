@@ -1,0 +1,17 @@
+[Unit]
+Description=Avito Parser SQLite Worker
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/avito_parser
+EnvironmentFile=/opt/avito_parser/.env
+ExecStart=/opt/avito_parser/.venv/bin/python worker.py --mode worker
+Restart=always
+RestartSec=3
+TimeoutStopSec=120
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

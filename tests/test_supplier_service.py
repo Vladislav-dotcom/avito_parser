@@ -23,23 +23,14 @@ def test_create_supplier_success(tmp_path, monkeypatch):
     monkeypatch.setattr(Config, "SQLITE_DB_PATH", tmp_path / "suppliers.db")
     init_db()
 
-    supplier = create_supplier("Новый", "Я")
+    supplier = create_supplier("Новый")
     assert supplier["name"] == "Новый"
-    assert supplier["letter"] == "Я"
     assert len(list_suppliers()) == 6
 
 
-def test_create_supplier_duplicate_letter(tmp_path, monkeypatch):
+def test_create_supplier_duplicate_name(tmp_path, monkeypatch):
     monkeypatch.setattr(Config, "SQLITE_DB_PATH", tmp_path / "suppliers.db")
     init_db()
 
-    with pytest.raises(SupplierValidationError, match="Буква уже используется"):
-        create_supplier("Другой", "Е")
-
-
-def test_create_supplier_invalid_letter(tmp_path, monkeypatch):
-    monkeypatch.setattr(Config, "SQLITE_DB_PATH", tmp_path / "suppliers.db")
-    init_db()
-
-    with pytest.raises(SupplierValidationError, match="одним символом"):
-        create_supplier("Тест", "AB")
+    with pytest.raises(SupplierValidationError, match="именем уже существует"):
+        create_supplier("Еремеев")

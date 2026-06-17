@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import logging
 from pathlib import Path
+from time import time
 from typing import Optional
 from uuid import uuid4
 
@@ -51,6 +52,10 @@ def _build_job_status(job: dict) -> dict:
     progress_percent = int((processed_rows / total_rows) * 100) if total_rows else 0
     state = str(job.get("state", "queued"))
     is_finished = state == "finished"
+    last_progress_at = job.get("last_progress_at") or job.get("started_at")
+    stale_warning = False
+    if state == "processing" and last_progress_at:
+        stale_warning = (int(time()) - int(last_progress_at)) > Config.STALE_PROGRESS_SECONDS
 
     return {
         "job_id": job["id"],
@@ -62,6 +67,8 @@ def _build_job_status(job: dict) -> dict:
         "error": job.get("error"),
         "is_finished": is_finished,
         "result_ready": bool(job.get("result_path")) and is_finished,
+        "last_progress_at": last_progress_at,
+        "stale_warning": stale_warning,
     }
 
 
@@ -120,9 +127,8 @@ def create_app() -> Flask:
     def create_supplier_api():
         payload = request.get_json(silent=True) or {}
         name = str(payload.get("name", ""))
-        letter = str(payload.get("letter", ""))
         try:
-            supplier = create_supplier(name=name, letter=letter)
+            supplier = create_supplier(name=name)
         except SupplierValidationError as exc:
             return jsonify({"error": str(exc)}), 400
         return jsonify({"supplier": supplier}), 201

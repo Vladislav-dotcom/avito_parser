@@ -43,10 +43,9 @@
 ### Экспорт под 1С (единственный формат результата)
 
 - **Один XLSX = один поставщик**: перед загрузкой в UI обязателен выбор из справочника `suppliers`.
-- Справочник в SQLite (`suppliers`): сид — Еремеев/Е, Неботов/Н, Усмамбаев/У, Сергей/С, plc:Store/Д; в UI можно добавить нового (имя + уникальная буква).
-- В `jobs` хранится `supplier_id` — worker подставляет букву в артикул.
+- Справочник в SQLite (`suppliers`): сид — Еремеев, Неботов, Усмамбаев, Сергей, plc:Store; в UI можно добавить нового (только имя).
+- В `jobs` хранится `supplier_id` для привязки файла к поставщику.
 - Финальный XLSX (`format_export_for_1c` в `services/excel_service.py`):
-  - к `Артикул` дописывается ` {буква}` (один пробел), если суффикса выбранного поставщика ещё нет;
   - переименование: `Наименование`→`название`, `Бренд`→`производитель`, `Артикул`→`артикул`;
   - остальные колонки без изменений (все входные + AI-поля).
 - API: `GET/POST /api/suppliers`, в `POST /api/upload` — поле `supplier_id`.
@@ -88,7 +87,7 @@
 1. Вызовы к RouterAI только синхронные и по одной строке (без async/параллели).
 2. Нельзя ломать контракт статусов job (`queued/processing/finished/failed`) — фронт на это опирается.
 3. Нельзя удалять механизм TTL-очистки — иначе диск забьется файлами.
-4. `job_id` хранится на фронте в `localStorage` для восстановления прогресса после reload.
+4. `job_id` хранится на фронте в `localStorage` и в URL (`?job_id=...`) для восстановления прогресса после reload.
 5. Prompt должен оставаться во внешнем файле (`prompts/parse_description.txt`), не хардкодить в Python.
 6. Выходное `Описание` в результирующем XLSX должно быть AI-сгенерированным, а не исходным полем из входного файла.
 7. AI-описание формируется только для строк, прошедших основной AI-разбор и попавших в результат.
@@ -97,8 +96,8 @@
 
 - API и auth: `app.py`
 - Очередь/БД/поставщики: `services/db_service.py`, `services/supplier_service.py`, `services/job_service.py`
-- Пайплайн обработки: `tasks.py`
-- Формат 1С в Excel: `services/excel_service.py` (`format_export_for_1c`, `append_supplier_letter`)
+- Пайплайн обработки: `tasks.py`, checkpoint: `services/checkpoint_service.py`
+- Формат 1С в Excel: `services/excel_service.py` (`format_export_for_1c`)
 - Очистка файлов: `services/cleanup_service.py`, `worker.py --mode cleanup`
 - AI парсинг и retry: `services/ai_service.py`
 - UI/polling: `static/app.js`, `templates/index.html`, `templates/login.html`
@@ -173,6 +172,14 @@
 Каталоги radioelementy («Папка бренда», «Название производителя») чистятся отдельным CLI в `../excel_editor/`:
 - полный прогон: `clean_excel.py`
 - только бренды в готовом XLSX: `clean_brands_only.py` (без повторного AI)
+
+## Зависший прогресс / стабильность worker
+
+- Worker периодически вызывает `requeue_stale_processing_jobs` (интервал `STALE_REQUEUE_INTERVAL_SECONDS`, порог `STALE_PROGRESS_SECONDS` по `last_progress_at`).
+- При SIGTERM worker завершает текущую строку и возвращает job в `queued` (`release_job_to_queue`); redeploy делает `systemctl stop` для worker (см. `deploy/redeploy.sh`, `deploy/avito-worker.service`).
+- Checkpoint в `storage/checkpoints/{job_id}.jsonl` — resume с места обрыва без повторного AI.
+- API `/api/status` отдаёт `stale_warning: true`, если processing без прогресса дольше порога; UI показывает предупреждение.
+- Прямая ссылка на job: `/?job_id=<uuid>`.
 
 ## Быстрый smoke-check после правок
 

@@ -7,9 +7,9 @@ const supplierSelect = document.getElementById("supplierId");
 const fileInput = document.getElementById("fileInput");
 const addSupplierBtn = document.getElementById("addSupplierBtn");
 const newSupplierNameInput = document.getElementById("newSupplierName");
-const newSupplierLetterInput = document.getElementById("newSupplierLetter");
 const supplierFormError = document.getElementById("supplierFormError");
 const STORAGE_KEY = "avito_parser_current_job_id";
+const JOB_ID_QUERY_PARAM = "job_id";
 
 let pollingTimer = null;
 let currentJobId = null;
@@ -45,6 +45,22 @@ function updateUploadButtonState() {
   uploadBtn.disabled = !(hasSupplier && hasFile);
 }
 
+function getJobIdFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const jobId = params.get(JOB_ID_QUERY_PARAM);
+  return jobId ? jobId.trim() : "";
+}
+
+function setJobIdInUrl(jobId) {
+  const url = new URL(window.location.href);
+  if (jobId) {
+    url.searchParams.set(JOB_ID_QUERY_PARAM, jobId);
+  } else {
+    url.searchParams.delete(JOB_ID_QUERY_PARAM);
+  }
+  window.history.replaceState({}, "", url);
+}
+
 function fillSupplierSelect(suppliers, selectedId = "") {
   if (!supplierSelect) {
     return;
@@ -54,7 +70,7 @@ function fillSupplierSelect(suppliers, selectedId = "") {
   suppliers.forEach((supplier) => {
     const option = document.createElement("option");
     option.value = supplier.id;
-    option.textContent = `${supplier.name} (${supplier.letter})`;
+    option.textContent = supplier.name;
     supplierSelect.appendChild(option);
   });
   if (previousValue) {
@@ -77,11 +93,10 @@ async function loadSuppliers() {
 
 async function addSupplier() {
   const name = newSupplierNameInput.value.trim();
-  const letter = newSupplierLetterInput.value.trim();
   showSupplierFormError("");
 
-  if (!name || !letter) {
-    showSupplierFormError("Укажите имя и букву поставщика.");
+  if (!name) {
+    showSupplierFormError("Укажите имя поставщика.");
     return;
   }
 
@@ -90,7 +105,7 @@ async function addSupplier() {
     const response = await fetch("/api/suppliers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, letter }),
+      body: JSON.stringify({ name }),
     });
     const payload = await response.json();
     if (!response.ok) {
@@ -102,7 +117,6 @@ async function addSupplier() {
       supplierSelect.value = payload.supplier.id;
     }
     newSupplierNameInput.value = "";
-    newSupplierLetterInput.value = "";
     updateUploadButtonState();
   } catch (error) {
     showSupplierFormError(error.message);
@@ -126,11 +140,13 @@ function enableDownloadButton(jobId) {
 function saveCurrentJobId(jobId) {
   currentJobId = jobId;
   localStorage.setItem(STORAGE_KEY, jobId);
+  setJobIdInUrl(jobId);
 }
 
 function clearCurrentJobId() {
   currentJobId = null;
   localStorage.removeItem(STORAGE_KEY);
+  setJobIdInUrl("");
 }
 
 function stopPolling() {
@@ -194,7 +210,11 @@ function applyStatusToUI(jobId, status) {
   }
 
   if (state === "processing") {
-    setStatus(`Анализ... ${progressText}`);
+    if (status.stale_warning) {
+      setStatus(`Обработка приостановлена (${progressText}). Ожидаем автоматическое восстановление...`, "warning");
+    } else {
+      setStatus(`Анализ... ${progressText}`);
+    }
     setProgress(status.progress_percent || 0);
     resetDownloadButton();
     uploadBtn.disabled = true;
@@ -256,7 +276,8 @@ function startPolling(jobId) {
 }
 
 function restoreJobStateOnLoad() {
-  const savedJobId = localStorage.getItem(STORAGE_KEY);
+  const jobIdFromUrl = getJobIdFromUrl();
+  const savedJobId = jobIdFromUrl || localStorage.getItem(STORAGE_KEY);
   if (!savedJobId) {
     return;
   }

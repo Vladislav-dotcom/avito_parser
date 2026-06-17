@@ -29,11 +29,14 @@ class Config:
     AI_RETRIES = int(os.getenv("AI_RETRIES", "2"))
     AI_RETRY_DELAY_SECONDS = float(os.getenv("AI_RETRY_DELAY_SECONDS", "1.5"))
     JOB_POLL_INTERVAL_SECONDS = float(os.getenv("JOB_POLL_INTERVAL_SECONDS", "1.0"))
+    STALE_PROGRESS_SECONDS = int(os.getenv("STALE_PROGRESS_SECONDS", "300"))
+    STALE_REQUEUE_INTERVAL_SECONDS = float(os.getenv("STALE_REQUEUE_INTERVAL_SECONDS", "30"))
     STALE_PROCESSING_SECONDS = int(os.getenv("STALE_PROCESSING_SECONDS", "7200"))
 
     STORAGE_DIR = BASE_DIR / "storage"
     UPLOAD_DIR = STORAGE_DIR / "uploads"
     RESULT_DIR = STORAGE_DIR / "results"
+    CHECKPOINT_DIR = STORAGE_DIR / "checkpoints"
     LOG_DIR = BASE_DIR / "logs"
     PROMPT_FILE = BASE_DIR / "prompts" / "parse_description.txt"
     SQLITE_DB_PATH = Path(os.getenv("SQLITE_DB_PATH", str(BASE_DIR / "storage" / "jobs.db")))
@@ -45,4 +48,5 @@ class Config:
         cls.STORAGE_DIR.mkdir(parents=True, exist_ok=True)
         cls.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         cls.RESULT_DIR.mkdir(parents=True, exist_ok=True)
+        cls.CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
         cls.LOG_DIR.mkdir(parents=True, exist_ok=True)
