@@ -22,30 +22,6 @@
           </div>
 
           <form id="uploadForm" class="d-flex flex-column gap-3">
-            <div>
-              <label class="form-label" for="supplierId">Поставщик</label>
-              <select class="form-select" id="supplierId" name="supplier_id" required>
-                <option value="">Выберите поставщика</option>
-              </select>
-              <div class="form-text">Один файл = один поставщик. Выберите до начала анализа.</div>
-            </div>
-
-            <div class="border rounded p-3">
-              <div class="fw-semibold mb-2">Добавить поставщика</div>
-              <div class="row g-2 align-items-end">
-                <div class="col-md-9">
-                  <label class="form-label" for="newSupplierName">Имя</label>
-                  <input class="form-control" id="newSupplierName" type="text" maxlength="100" />
-                </div>
-                <div class="col-md-3">
-                  <button class="btn btn-outline-primary w-100" id="addSupplierBtn" type="button">
-                    Добавить
-                  </button>
-                </div>
-              </div>
-              <div id="supplierFormError" class="text-danger small mt-2 d-none"></div>
-            </div>
-
             <input
               class="form-control"
               type="file"

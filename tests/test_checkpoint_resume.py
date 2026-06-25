@@ -5,15 +5,9 @@ import pytest
 
 from config import Config
 from services.checkpoint_service import append_checkpoint
-from services.db_service import init_db, list_suppliers, requeue_stale_processing_jobs, update_job_progress
+from services.db_service import init_db, requeue_stale_processing_jobs, update_job_progress
 from services.job_service import claim_job_for_worker, enqueue_parse_job, get_job_by_id
 from tasks import process_xlsx_job
-
-
-def _first_supplier_id() -> str:
-    suppliers = list_suppliers()
-    assert suppliers
-    return str(suppliers[0]["id"])
 
 
 def _make_xlsx(path, rows: int = 3) -> None:
@@ -49,7 +43,6 @@ def test_process_xlsx_job_resumes_from_checkpoint(tmp_path, monkeypatch):
     job_id = enqueue_parse_job(
         upload_path=upload_file,
         original_filename="input.xlsx",
-        supplier_id=_first_supplier_id(),
     )
     claim_job_for_worker()
 

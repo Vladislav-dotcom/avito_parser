@@ -26,7 +26,6 @@ from services.excel_service import (
     validate_columns,
     write_excel,
 )
-from services.supplier_service import get_supplier
 
 logger = logging.getLogger(__name__)
 
@@ -71,17 +70,6 @@ def process_xlsx_job(
     job = fetch_job(job_id)
     if job is None:
         raise ValueError(f"Job not found: {job_id}")
-
-    supplier_id = job.get("supplier_id")
-    if not supplier_id:
-        fail_job(job_id=job_id, error="Не указан поставщик для задачи.")
-        delete_checkpoint(job_id)
-        raise ValueError("Не указан поставщик для задачи.")
-
-    if get_supplier(str(supplier_id)) is None:
-        fail_job(job_id=job_id, error="Поставщик для задачи не найден.")
-        delete_checkpoint(job_id)
-        raise ValueError("Поставщик для задачи не найден.")
 
     try:
         dataframe = read_excel(upload_path)

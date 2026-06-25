@@ -6,11 +6,10 @@ from typing import Optional
 from services.db_service import claim_next_job, create_job, fetch_job
 
 
-def enqueue_parse_job(upload_path: Path, original_filename: str, supplier_id: str) -> str:
+def enqueue_parse_job(upload_path: Path, original_filename: str) -> str:
     return create_job(
         upload_path=upload_path,
         original_filename=original_filename,
-        supplier_id=supplier_id,
     )
 
 

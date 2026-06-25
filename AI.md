@@ -42,13 +42,9 @@
 
 ### Экспорт под 1С (единственный формат результата)
 
-- **Один XLSX = один поставщик**: перед загрузкой в UI обязателен выбор из справочника `suppliers`.
-- Справочник в SQLite (`suppliers`): сид — Еремеев, Неботов, Усмамбаев, Сергей, plc:Store; в UI можно добавить нового (только имя).
-- В `jobs` хранится `supplier_id` для привязки файла к поставщику.
 - Финальный XLSX (`format_export_for_1c` в `services/excel_service.py`):
   - переименование: `Наименование`→`название`, `Бренд`→`производитель`, `Артикул`→`артикул`;
   - остальные колонки без изменений (все входные + AI-поля).
-- API: `GET/POST /api/suppliers`, в `POST /api/upload` — поле `supplier_id`.
 
 ## Текущая архитектура (важно)
 
@@ -95,7 +91,7 @@
 ## Где что править
 
 - API и auth: `app.py`
-- Очередь/БД/поставщики: `services/db_service.py`, `services/supplier_service.py`, `services/job_service.py`
+- Очередь/БД: `services/db_service.py`, `services/job_service.py`
 - Пайплайн обработки: `tasks.py`, checkpoint: `services/checkpoint_service.py`
 - Формат 1С в Excel: `services/excel_service.py` (`format_export_for_1c`)
 - Очистка файлов: `services/cleanup_service.py`, `worker.py --mode cleanup`
