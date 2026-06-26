@@ -132,6 +132,49 @@ def test_build_result_dataframe_skips_rows_without_article():
     assert result["Описание"].tolist() == ["Описание IFM"]
 
 
+def test_build_result_dataframe_skips_excluded_catalog_row():
+    dataframe = pd.DataFrame(
+        [
+            {
+                "Наименование": "Siemens каталог",
+                "Цена": 100,
+                "Валюта": "RUB",
+                "Кол-во в наличии": 1,
+                "Раздел": "A",
+                "Категория": "B",
+                "Описание": "3RU1126 3SB3601 3VL9400",
+            },
+            {
+                "Наименование": "3RV1021-1AA15",
+                "Цена": 5000,
+                "Валюта": "RUB",
+                "Кол-во в наличии": 1,
+                "Раздел": "A",
+                "Категория": "B",
+                "Описание": "3RV1021-1AA15",
+            },
+        ]
+    )
+    parsed_rows = [
+        [],
+        [
+            {
+                "brand": "Siemens",
+                "article": "3RV1021-1AA15",
+                "price": 5000,
+                "quantity": 1,
+                "condition": "бу",
+                "generated_description": "Автомат",
+            }
+        ],
+    ]
+
+    result = build_result_dataframe(dataframe, parsed_rows)
+    assert len(result.index) == 1
+    assert result["Артикул"].iloc[0] == "3RV1021-1AA15"
+    assert result["Цена"].iloc[0] == 5000
+
+
 def test_format_export_for_1c_renames_columns():
     dataframe = pd.DataFrame(
         [

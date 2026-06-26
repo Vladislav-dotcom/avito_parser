@@ -7,6 +7,8 @@ from uuid import uuid4
 
 from config import Config
 from services.ai_service import parse_description
+from services.condition_service import extract_condition_markers, merge_condition
+from services.price_service import sanitize_multi_item_prices, should_exclude_catalog_row
 from services.checkpoint_service import append_checkpoint, delete_checkpoint, load_checkpoint
 from services.cleanup_service import schedule_file_deletion
 from services.db_service import (
@@ -46,11 +48,24 @@ def _process_row(
     row_number: int,
     row,
 ) -> tuple[list[dict], bool]:
+    description = str(row.get("Описание", ""))
     parsed_items, error_message = parse_description(
-        description=str(row.get("Описание", "")),
+        description=description,
         row_data=row.to_dict(),
         job_id=job_id,
     )
+    parsed_items = sanitize_multi_item_prices(parsed_items, row.get("Цена"))
+    if should_exclude_catalog_row(parsed_items):
+        logger.info(
+            "Объявление исключено: каталог без цен",
+            extra={"job_id": job_id, "row_index": row_number},
+        )
+        return [], False
+
+    markers = extract_condition_markers(description)
+    for item in parsed_items:
+        item["condition"] = merge_condition(item.get("condition"), markers)
+
     had_error = bool(error_message)
     if had_error:
         logger.warning(
