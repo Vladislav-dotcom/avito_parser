@@ -185,9 +185,10 @@
 - Worker периодически вызывает `requeue_stale_processing_jobs` (интервал `STALE_REQUEUE_INTERVAL_SECONDS`, порог `STALE_PROGRESS_SECONDS` по `last_progress_at`); то же делает cleanup-loop.
 - Watchdog-поток: если текущий job без прогресса дольше порога — `release_job_to_queue` + `os._exit(1)` (systemd `Restart=always`).
 - При SIGTERM worker завершает текущую строку и возвращает job в `queued` (`release_job_to_queue`); redeploy делает `systemctl stop` для worker (см. `deploy/redeploy.sh`, `deploy/avito-worker.service`).
+- `started_at` при requeue/resume **не сбрасывается** (`COALESCE` в claim) — иначе ETA после деплоя становится «~1 мин».
 - Checkpoint в `storage/checkpoints/{job_id}.jsonl` — resume с места обрыва без повторного AI.
 - Длинные `Описание` режутся на chunks (`AI_DESCRIPTION_CHUNK_CHARS`); после chunk mid-row heartbeat (`touch_job_progress`); если уже каталог без цен — остальные chunks не вызываются.
-- API `/api/status` отдаёт `stale_warning`, `eta_seconds`, `rows_per_minute`, `elapsed_seconds`; UI показывает «Осталось ~N мин/ч».
+- API `/api/status` отдаёт `stale_warning`, `eta_seconds`, `rows_per_minute`, `elapsed_seconds`; ETA через `compute_progress_eta` (fallback на `created_at`, если скорость >1 строки/сек — типичный артефакт reset `started_at`).
 - Прямая ссылка на job: `/?job_id=<uuid>`.
 - Сервис не ходит на Avito и не делает веб-поиск: только RouterAI `chat/completions` по тексту из XLSX.
 

@@ -14,6 +14,7 @@ from werkzeug.utils import secure_filename
 from config import Config
 from services.cleanup_service import cleanup_expired_files, schedule_file_deletion
 from services.db_service import init_db
+from services.eta_service import compute_progress_eta
 from services.job_service import enqueue_parse_job, get_job_by_id
 from services.logging_config import configure_logging
 
@@ -48,20 +49,18 @@ def _build_job_status(job: dict) -> dict:
     is_finished = state == "finished"
     last_progress_at = job.get("last_progress_at") or job.get("started_at")
     started_at = job.get("started_at")
+    created_at = job.get("created_at")
     stale_warning = False
     if state in {"processing", "finalizing"} and last_progress_at:
         stale_warning = (int(time()) - int(last_progress_at)) > Config.STALE_PROGRESS_SECONDS
 
-    elapsed_seconds = None
-    rows_per_minute = None
-    eta_seconds = None
-    if started_at and state in {"processing", "finalizing"}:
-        elapsed_seconds = max(0, int(time()) - int(started_at))
-        if state == "processing" and processed_rows > 0 and elapsed_seconds > 0:
-            rate = processed_rows / elapsed_seconds
-            rows_per_minute = round(rate * 60, 2)
-            remaining = max(0, total_rows - processed_rows)
-            eta_seconds = int(remaining / rate) if rate > 0 else None
+    elapsed_seconds, rows_per_minute, eta_seconds = compute_progress_eta(
+        processed_rows=processed_rows,
+        total_rows=total_rows,
+        state=state,
+        started_at=int(started_at) if started_at else None,
+        created_at=int(created_at) if created_at else None,
+    )
 
     return {
         "job_id": job["id"],

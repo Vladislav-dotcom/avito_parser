@@ -101,7 +101,7 @@ def requeue_stale_processing_jobs(stale_seconds: int) -> int:
         cursor = conn.execute(
             """
             UPDATE jobs
-            SET state = 'queued', started_at = NULL, error = 'job_requeued_after_stale_timeout'
+            SET state = 'queued', error = 'job_requeued_after_stale_timeout'
             WHERE state IN ('processing', 'finalizing')
               AND COALESCE(last_progress_at, started_at) IS NOT NULL
               AND COALESCE(last_progress_at, started_at) < ?
@@ -118,7 +118,7 @@ def requeue_orphan_jobs() -> int:
         cursor = conn.execute(
             """
             UPDATE jobs
-            SET state = 'queued', started_at = NULL, error = 'job_requeued_on_worker_start'
+            SET state = 'queued', error = 'job_requeued_on_worker_start'
             WHERE state IN ('processing', 'finalizing')
             """
         )
@@ -141,7 +141,7 @@ def release_job_to_queue(job_id: str) -> None:
         conn.execute(
             """
             UPDATE jobs
-            SET state = 'queued', started_at = NULL, error = 'job_released_for_shutdown'
+            SET state = 'queued', error = 'job_released_for_shutdown'
             WHERE id = ? AND state = 'processing'
             """,
             (job_id,),
@@ -167,10 +167,14 @@ def claim_next_job() -> Optional[dict]:
 
         job_id = row["id"]
         now_ts = int(time())
+        # started_at сохраняем при resume — иначе ETA считает скорость от «свежего» старта.
         conn.execute(
             """
             UPDATE jobs
-            SET state = 'processing', started_at = ?, last_progress_at = ?, error = NULL
+            SET state = 'processing',
+                started_at = COALESCE(started_at, ?),
+                last_progress_at = ?,
+                error = NULL
             WHERE id = ? AND state = 'queued'
             """,
             (now_ts, now_ts, job_id),

@@ -96,7 +96,8 @@ def test_requeue_preserves_processed_rows(tmp_path, monkeypatch):
         upload_path=upload_file,
         original_filename="input.xlsx",
     )
-    claim_job_for_worker()
+    claimed = claim_job_for_worker()
+    original_started = claimed["started_at"]
 
     with get_connection() as conn:
         conn.execute(
@@ -117,6 +118,11 @@ def test_requeue_preserves_processed_rows(tmp_path, monkeypatch):
     assert job["state"] == "queued"
     assert job["processed_rows"] == 50
     assert job["failed_rows"] == 2
+    assert job["started_at"] == original_started
+
+    reclaimed = claim_job_for_worker()
+    assert reclaimed is not None
+    assert reclaimed["started_at"] == original_started
 
 
 def test_requeue_stale_finalizing_job(tmp_path, monkeypatch):
