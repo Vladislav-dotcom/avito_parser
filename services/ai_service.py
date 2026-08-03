@@ -3,17 +3,24 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Callable
 from typing import Any, List, Optional, Tuple
 
 import httpx
 from pydantic import BaseModel, ValidationError, field_validator
 
 from config import Config
+from services.price_service import sanitize_multi_item_prices, should_exclude_catalog_row
 from services.prompt_service import load_prompt_template
+from services.text_service import merge_parsed_items, split_description_chunks
 
 logger = logging.getLogger(__name__)
 
 _ALLOWED_CONDITIONS = {"новое", "бу", "без коробки"}
+_CHUNK_PREFIX = (
+    "Фрагмент {index} из {total} одного объявления. "
+    "Извлеки позиции только из этого фрагмента, не додумывай данные из других частей.\n\n"
+)
 
 
 class ParsedDescription(BaseModel):
@@ -85,14 +92,19 @@ def _empty_result() -> List[dict[str, Any]]:
     return [ParsedDescription().model_dump()]
 
 
-def parse_description(
-    description: str,
+def _build_prompt_text(
+    prompt_template: str,
     row_data: dict[str, Any],
-    job_id: str,
-) -> Tuple[List[dict[str, Any]], Optional[str]]:
-    prompt_template = load_prompt_template(Config.PROMPT_FILE)
-    prompt_text = prompt_template.format(
-        description=description or "",
+    description: str,
+    *,
+    chunk_index: int | None = None,
+    chunk_total: int | None = None,
+) -> str:
+    if chunk_index is not None and chunk_total is not None and chunk_total > 1:
+        description = _CHUNK_PREFIX.format(index=chunk_index, total=chunk_total) + description
+
+    return prompt_template.format(
+        description=description,
         name=row_data.get("Наименование", ""),
         section=row_data.get("Раздел", ""),
         category=row_data.get("Категория", ""),
@@ -100,6 +112,11 @@ def parse_description(
         currency=row_data.get("Валюта", ""),
     )
 
+
+def _request_parse(
+    prompt_text: str,
+    job_id: str,
+) -> Tuple[List[dict[str, Any]], Optional[str]]:
     request_body = {
         "model": Config.ROUTERAI_MODEL,
         "messages": [
@@ -126,14 +143,8 @@ def parse_description(
                 parsed_items = _parse_json_response(content)
 
             latency_ms = int((time.perf_counter() - started) * 1000)
-            logger.info(
-                "AI запрос выполнен",
-                extra={"job_id": job_id},
-            )
-            logger.info(
-                f"AI latency_ms={latency_ms}",
-                extra={"job_id": job_id},
-            )
+            logger.info("AI запрос выполнен", extra={"job_id": job_id})
+            logger.info(f"AI latency_ms={latency_ms}", extra={"job_id": job_id})
             return [item.model_dump() for item in parsed_items], None
         except (httpx.HTTPError, json.JSONDecodeError, ValidationError, ValueError) as exc:
             latency_ms = int((time.perf_counter() - started) * 1000)
@@ -146,3 +157,63 @@ def parse_description(
                 time.sleep(Config.AI_RETRY_DELAY_SECONDS)
 
     return _empty_result(), last_error
+
+
+def parse_description(
+    description: str,
+    row_data: dict[str, Any],
+    job_id: str,
+    *,
+    row_price: Any = None,
+    on_chunk_done: Callable[[], None] | None = None,
+) -> Tuple[List[dict[str, Any]], Optional[str]]:
+    prompt_template = load_prompt_template(Config.PROMPT_FILE)
+    text = description or ""
+    chunks = split_description_chunks(text, Config.AI_DESCRIPTION_CHUNK_CHARS)
+
+    if len(chunks) > 1:
+        logger.info(
+            f"Описание разбито на {len(chunks)} фрагментов ({len(text)} символов)",
+            extra={"job_id": job_id},
+        )
+
+    chunk_results: list[list[dict[str, Any]]] = []
+    errors: list[str] = []
+
+    for index, chunk in enumerate(chunks, start=1):
+        prompt_text = _build_prompt_text(
+            prompt_template,
+            row_data,
+            chunk,
+            chunk_index=index,
+            chunk_total=len(chunks),
+        )
+        parsed_items, error = _request_parse(prompt_text, job_id)
+        chunk_results.append(parsed_items)
+        if error:
+            errors.append(error)
+
+        if on_chunk_done is not None:
+            on_chunk_done()
+
+        merged_so_far = merge_parsed_items(chunk_results)
+        sanitized = sanitize_multi_item_prices(merged_so_far, row_price)
+        if should_exclude_catalog_row(sanitized) and index < len(chunks):
+            logger.info(
+                f"Пропуск остальных фрагментов: каталог без цен после chunk {index}/{len(chunks)}",
+                extra={"job_id": job_id},
+            )
+            return sanitized, None
+
+    merged = merge_parsed_items(chunk_results)
+    if merged and merged != [{}]:
+        if errors:
+            logger.warning(
+                f"Часть фрагментов описания с ошибкой: {'; '.join(errors)}",
+                extra={"job_id": job_id},
+            )
+        return merged, None
+
+    if errors:
+        return _empty_result(), errors[-1]
+    return merged, None

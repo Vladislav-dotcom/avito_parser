@@ -103,6 +103,7 @@
 - Формат 1С в Excel: `services/excel_service.py` (`format_export_for_1c`)
 - Очистка файлов: `services/cleanup_service.py`, `worker.py --mode cleanup`
 - AI парсинг и retry: `services/ai_service.py`
+- Нарезка длинных описаний / merge позиций: `services/text_service.py`
 - Маркеры состояния из описания: `services/condition_service.py`
 - Фильтр цен multi-item / каталоги: `services/price_service.py`
 - Prompt: `prompts/parse_description.txt`
@@ -180,16 +181,20 @@
 
 ## Зависший прогресс / стабильность worker
 
-- Worker периодически вызывает `requeue_stale_processing_jobs` (интервал `STALE_REQUEUE_INTERVAL_SECONDS`, порог `STALE_PROGRESS_SECONDS` по `last_progress_at`).
+- Worker на старте сразу возвращает в `queued` все orphan `processing`/`finalizing` (`requeue_orphan_jobs`).
+- Worker периодически вызывает `requeue_stale_processing_jobs` (интервал `STALE_REQUEUE_INTERVAL_SECONDS`, порог `STALE_PROGRESS_SECONDS` по `last_progress_at`); то же делает cleanup-loop.
+- Watchdog-поток: если текущий job без прогресса дольше порога — `release_job_to_queue` + `os._exit(1)` (systemd `Restart=always`).
 - При SIGTERM worker завершает текущую строку и возвращает job в `queued` (`release_job_to_queue`); redeploy делает `systemctl stop` для worker (см. `deploy/redeploy.sh`, `deploy/avito-worker.service`).
 - Checkpoint в `storage/checkpoints/{job_id}.jsonl` — resume с места обрыва без повторного AI.
-- API `/api/status` отдаёт `stale_warning: true`, если processing без прогресса дольше порога; UI показывает предупреждение.
+- Длинные `Описание` режутся на chunks (`AI_DESCRIPTION_CHUNK_CHARS`); после chunk mid-row heartbeat (`touch_job_progress`); если уже каталог без цен — остальные chunks не вызываются.
+- API `/api/status` отдаёт `stale_warning`, `eta_seconds`, `rows_per_minute`, `elapsed_seconds`; UI показывает «Осталось ~N мин/ч».
 - Прямая ссылка на job: `/?job_id=<uuid>`.
+- Сервис не ходит на Avito и не делает веб-поиск: только RouterAI `chat/completions` по тексту из XLSX.
 
 ## Быстрый smoke-check после правок
 
 1. Логин в UI проходит.
 2. Загрузка XLSX создает job.
-3. Прогресс обновляется и восстанавливается после перезагрузки страницы.
+3. Прогресс обновляется (с ETA) и восстанавливается после перезагрузки страницы.
 4. После завершения активна кнопка `Скачать`.
 5. Worker и cleanup живы, в логах нет критичных ошибок.

@@ -47,9 +47,21 @@ def _build_job_status(job: dict) -> dict:
     state = str(job.get("state", "queued"))
     is_finished = state == "finished"
     last_progress_at = job.get("last_progress_at") or job.get("started_at")
+    started_at = job.get("started_at")
     stale_warning = False
-    if state == "processing" and last_progress_at:
+    if state in {"processing", "finalizing"} and last_progress_at:
         stale_warning = (int(time()) - int(last_progress_at)) > Config.STALE_PROGRESS_SECONDS
+
+    elapsed_seconds = None
+    rows_per_minute = None
+    eta_seconds = None
+    if started_at and state in {"processing", "finalizing"}:
+        elapsed_seconds = max(0, int(time()) - int(started_at))
+        if state == "processing" and processed_rows > 0 and elapsed_seconds > 0:
+            rate = processed_rows / elapsed_seconds
+            rows_per_minute = round(rate * 60, 2)
+            remaining = max(0, total_rows - processed_rows)
+            eta_seconds = int(remaining / rate) if rate > 0 else None
 
     return {
         "job_id": job["id"],
@@ -62,7 +74,11 @@ def _build_job_status(job: dict) -> dict:
         "is_finished": is_finished,
         "result_ready": bool(job.get("result_path")) and is_finished,
         "last_progress_at": last_progress_at,
+        "started_at": started_at,
         "stale_warning": stale_warning,
+        "elapsed_seconds": elapsed_seconds,
+        "rows_per_minute": rows_per_minute,
+        "eta_seconds": eta_seconds,
     }
 
 

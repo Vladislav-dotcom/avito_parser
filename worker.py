@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
+import threading
 import time
 
 from config import Config
 from services.cleanup_service import cleanup_expired_files
-from services.db_service import init_db, requeue_stale_processing_jobs, release_job_to_queue
+from services.db_service import (
+    fetch_job,
+    init_db,
+    release_job_to_queue,
+    requeue_orphan_jobs,
+    requeue_stale_processing_jobs,
+)
 from services.job_service import claim_job_for_worker
 from services.logging_config import configure_logging
 from tasks import process_xlsx_job
@@ -41,18 +49,40 @@ def _maybe_requeue_stale_jobs(last_check_at: float) -> float:
     return now
 
 
+def _watchdog_loop() -> None:
+    while not _shutdown_requested:
+        job_id = _current_job_id
+        if job_id:
+            job = fetch_job(job_id)
+            if job and job.get("state") in {"processing", "finalizing"}:
+                last_progress_at = job.get("last_progress_at") or job.get("started_at")
+                if last_progress_at:
+                    age = int(time.time()) - int(last_progress_at)
+                    if age > Config.STALE_PROGRESS_SECONDS:
+                        logger.error(
+                            f"Watchdog: нет прогресса {age}с, release и exit",
+                            extra={"job_id": job_id},
+                        )
+                        release_job_to_queue(job_id)
+                        os._exit(1)
+        time.sleep(Config.STALE_REQUEUE_INTERVAL_SECONDS)
+
+
 def run_worker() -> None:
     global _shutdown_requested, _current_job_id
 
     signal.signal(signal.SIGTERM, _handle_shutdown)
     signal.signal(signal.SIGINT, _handle_shutdown)
 
-    requeued = requeue_stale_processing_jobs(Config.STALE_PROGRESS_SECONDS)
-    if requeued:
+    orphans = requeue_orphan_jobs()
+    if orphans:
         logger.warning(
-            f"В очередь возвращено зависших задач: {requeued}",
+            f"На старте в очередь возвращено orphan-задач: {orphans}",
             extra={"job_id": "worker"},
         )
+
+    watchdog = threading.Thread(target=_watchdog_loop, name="worker-watchdog", daemon=True)
+    watchdog.start()
 
     logger.info("Запущен worker loop", extra={"job_id": "worker"})
     last_stale_check = time.monotonic()
@@ -83,14 +113,26 @@ def run_worker() -> None:
 
 def run_cleanup_loop() -> None:
     logger.info("Запущен cleanup loop", extra={"job_id": "cleanup-loop"})
+    last_cleanup_at = 0.0
     while True:
-        deleted_count = cleanup_expired_files()
-        if deleted_count:
-            logger.info(
-                f"Удалено файлов: {deleted_count}",
+        now = time.monotonic()
+        if now - last_cleanup_at >= Config.CLEANUP_INTERVAL_SECONDS:
+            deleted_count = cleanup_expired_files()
+            if deleted_count:
+                logger.info(
+                    f"Удалено файлов: {deleted_count}",
+                    extra={"job_id": "cleanup-loop"},
+                )
+            last_cleanup_at = now
+
+        requeued = requeue_stale_processing_jobs(Config.STALE_PROGRESS_SECONDS)
+        if requeued:
+            logger.warning(
+                f"Cleanup: в очередь возвращено зависших задач: {requeued}",
                 extra={"job_id": "cleanup-loop"},
             )
-        time.sleep(Config.CLEANUP_INTERVAL_SECONDS)
+
+        time.sleep(Config.STALE_REQUEUE_INTERVAL_SECONDS)
 
 
 def main() -> None:

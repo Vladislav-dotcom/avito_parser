@@ -102,7 +102,7 @@ def requeue_stale_processing_jobs(stale_seconds: int) -> int:
             """
             UPDATE jobs
             SET state = 'queued', started_at = NULL, error = 'job_requeued_after_stale_timeout'
-            WHERE state = 'processing'
+            WHERE state IN ('processing', 'finalizing')
               AND COALESCE(last_progress_at, started_at) IS NOT NULL
               AND COALESCE(last_progress_at, started_at) < ?
             """,
@@ -110,6 +110,30 @@ def requeue_stale_processing_jobs(stale_seconds: int) -> int:
         )
         conn.commit()
         return cursor.rowcount
+
+
+def requeue_orphan_jobs() -> int:
+    """На старте worker все processing/finalizing — orphan (никого нет за работой)."""
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE jobs
+            SET state = 'queued', started_at = NULL, error = 'job_requeued_on_worker_start'
+            WHERE state IN ('processing', 'finalizing')
+            """
+        )
+        conn.commit()
+        return cursor.rowcount
+
+
+def touch_job_progress(job_id: str) -> None:
+    """Heartbeat без увеличения processed_rows (между AI-chunk'ами)."""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE jobs SET last_progress_at = ? WHERE id = ?",
+            (int(time()), job_id),
+        )
+        conn.commit()
 
 
 def release_job_to_queue(job_id: str) -> None:

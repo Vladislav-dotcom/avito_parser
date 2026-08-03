@@ -116,10 +116,25 @@ async function fetchStatus(jobId) {
   return response.json();
 }
 
+function formatEta(seconds) {
+  if (seconds == null || Number.isNaN(Number(seconds)) || Number(seconds) < 0) {
+    return "";
+  }
+  const totalMinutes = Math.max(1, Math.round(Number(seconds) / 60));
+  if (totalMinutes < 60) {
+    return `~${totalMinutes} мин`;
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes ? `~${hours} ч ${minutes} мин` : `~${hours} ч`;
+}
+
 function applyStatusToUI(jobId, status) {
   const processed = status.processed_rows || 0;
   const total = status.total_rows || 0;
-  const progressText = total > 0 ? `${processed}/${total}` : "подготовка...";
+  const percent = status.progress_percent || 0;
+  const progressText = total > 0 ? `${processed}/${total} (${percent}%)` : "подготовка...";
+  const etaText = formatEta(status.eta_seconds);
   const state = status.state || "queued";
 
   if (state === "queued") {
@@ -133,10 +148,12 @@ function applyStatusToUI(jobId, status) {
   if (state === "processing") {
     if (status.stale_warning) {
       setStatus(`Обработка приостановлена (${progressText}). Ожидаем автоматическое восстановление...`, "warning");
+    } else if (etaText) {
+      setStatus(`Анализ... ${progressText}. Осталось ${etaText}`);
     } else {
       setStatus(`Анализ... ${progressText}`);
     }
-    setProgress(status.progress_percent || 0);
+    setProgress(percent);
     resetDownloadButton();
     uploadBtn.disabled = true;
     return;

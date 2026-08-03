@@ -17,6 +17,7 @@ from services.db_service import (
     finish_job,
     get_connection,
     release_job_to_queue,
+    touch_job_progress,
     update_job_progress,
     update_job_state,
     update_job_total_rows,
@@ -53,6 +54,8 @@ def _process_row(
         description=description,
         row_data=row.to_dict(),
         job_id=job_id,
+        row_price=row.get("Цена"),
+        on_chunk_done=lambda: touch_job_progress(job_id),
     )
     parsed_items = sanitize_multi_item_prices(parsed_items, row.get("Цена"))
     if should_exclude_catalog_row(parsed_items):
