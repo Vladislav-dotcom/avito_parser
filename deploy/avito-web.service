@@ -1,0 +1,15 @@
+[Unit]
+Description=Avito Parser Web (Gunicorn)
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/avito_parser
+EnvironmentFile=/opt/avito_parser/.env
+ExecStart=/opt/avito_parser/.venv/bin/gunicorn --no-control-socket -w 1 -b 127.0.0.1:8000 app:app
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

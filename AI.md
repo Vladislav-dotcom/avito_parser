@@ -1,5 +1,12 @@
 # AI.md — контекст проекта
 
+## Доступ к продакшн-серверу
+
+- VPS: `206.223.249.181`; SSH только `avitoops` по ключу `C:/Users/user/.ssh/avito_parser_206_223_249_181` (`ssh avito-parser-new`).
+- **При обращении к серверу не использовать `root` для SSH.** Для административных команд подключаться как `avitoops` и вызывать `sudo` только внутри сессии.
+- В SSH отключены парольная аутентификация для всех пользователей и вход `root` даже по ключу. Не ослаблять эти ограничения при обслуживании.
+- Рабочий веб-адрес: `http://206.223.249.181/`. Доменного имени у сервиса нет.
+
 ## Репозиторий (GitHub)
 
 - URL: https://github.com/Vladislav-dotcom/avito_parser
@@ -117,11 +124,11 @@
 
 ## Автодеплой (GitHub → VPS)
 
-- Каталог в репо: `deploy/` (`redeploy.sh`, `github_webhook_listener.py`, обёртка с `flock`, systemd unit, nginx-сниппет).
-- На одном VPS с `ai_parser`: **порт webhook 9848**, путь **`/hooks/avito-parser/`** (у `ai_parser` — 9847 и `/hooks/ai-parser/`).
+- Каталог в репо: `deploy/` (`redeploy.sh`, `github_webhook_listener.py`, обёртка с `flock`, systemd-юниты, конфигурация nginx).
+- Webhook: **порт 9848 на `127.0.0.1`**, внешний путь **`http://206.223.249.181/hooks/avito-parser/`** через nginx.
 - Env на сервере: `/etc/avito-parser-deploy-hook.env` (не в git). Юнит: `avito-parser-github-hook.service`.
 - Рестарт после pull: `avito-web`, `avito-worker`, `avito-cleanup` (задаётся `SYSTEMD_RESTART_UNITS`).
-- Пошаговые SSH-команды: раздел **«Автодеплой по push»** в `README.md`.
+- Пошаговые команды: раздел **«Продакшн и автодеплой»** в `README.md`.
 
 ### Если в GitHub: «We couldn't deliver this payload: timed out»
 
@@ -129,11 +136,11 @@
 
 Проверить по приоритету:
 
-1. На VPS: `systemctl status avito-parser-github-hook` — процесс жив; порт смотри в env (`WEBHOOK_LISTEN_HOST`: часто `127.0.0.1`, у тебя может быть `0.0.0.0:9848`).
+1. На VPS: `sudo systemctl status avito-parser-github-hook` — процесс жив; `WEBHOOK_LISTEN_HOST=127.0.0.1`, порт 9848.
 2. `curl -sS -m 5 http://127.0.0.1:9848/health` с сервера — JSON `status: ok`. На **9848 только HTTP**, не TLS: `https://...:9848` даст зависание на рукопожатии — проверяй `http://`.
-3. С **внешней** машины: тот же URL, что в GitHub. Если `https://IP:443` → `connection refused`, nginx на 443 не слушает — либо подними прокси, либо вебхук на **http://** по схеме из `deploy/nginx-avito-parser-github-hook.conf` (там пример с `http://37.230.116.197/...`).
+3. С **внешней** машины: `http://206.223.249.181/hooks/avito-parser/health` должен отвечать `status: ok`.
 4. Firewall: входящие не DROP без ответа.
-5. Nginx: `nginx -t`, лог upstream; таймауты в `deploy/nginx-avito-parser-github-hook.conf`.
+5. Nginx: `sudo nginx -t`, лог upstream; конфигурация в `deploy/nginx-avito-parser-site.conf`.
 
 Если `systemctl` показывает `running`, а `curl http://127.0.0.1:9848/health` **всё равно** таймаутится долгое время — типичная причина: старый однопоточный `HTTPServer` занят одним «зависшим» соединением (неполный POST и т.п.), остальные запросы не обрабатываются. В репо слушатель переведён на `ThreadingHTTPServer`; после деплоя при зависании достаточно `systemctl restart avito-parser-github-hook`.
 
